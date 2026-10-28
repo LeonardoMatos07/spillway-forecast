@@ -1,0 +1,43 @@
+# Worker that keeps the published forecast fresh. Start it yourself when you want it:
+#   docker compose up -d --build forecast-worker
+#   docker compose logs -f forecast-worker
+#   docker compose stop forecast-worker
+# It joins the data stack network so it reaches the lake and the warehouse by name.
+services:
+  forecast-worker:
+    build: .
+    image: spillway-forecast-worker:local
+    command: ["watch", "--every", "${FORECAST_EVERY_MINUTES:-60}"]
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      # lake (silver layer): same variables and defaults as the pipeline
+      LAKE_S3_ENDPOINT_URL: ${LAKE_S3_ENDPOINT_URL:-http://lake:8333}
+      LAKE_BUCKET: ${LAKE_BUCKET:-energy-lake}
+      AWS_ACCESS_KEY_ID: ${LAKE_ACCESS_KEY:-lakeadmin}
+      AWS_SECRET_ACCESS_KEY: ${LAKE_SECRET_KEY:-lakesecret}
+      AWS_DEFAULT_REGION: us-east-1
+      # warehouse: the forecast tables are written here (role energia_forecast in production)
+      PUBLISH_DSN: ${PUBLISH_DSN:-postgresql://warehouse:warehouse@warehouse-db:5432/warehouse}
+      # API revalidation after each publish (empty = skip). Optional Cognito machine token,
+      # same variables as spillway-data: COGNITO_TOKEN_URL, DATA_CLIENT_ID, DATA_CLIENT_SECRET.
+      API_URL: ${API_URL:-http://host.docker.internal:8000}
+      COGNITO_TOKEN_URL: ${COGNITO_TOKEN_URL:-}
+      DATA_CLIENT_ID: ${DATA_CLIENT_ID:-}
+      DATA_CLIENT_SECRET: ${DATA_CLIENT_SECRET:-}
+      FORECAST_MODEL_MAX_AGE_DAYS: ${FORECAST_MODEL_MAX_AGE_DAYS:-45}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - forecast-data:/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+    networks: [default, datastack]
+
+networks:
+  datastack:
+    external: true
+    name: energia-data_default
+
+volumes:
+  forecast-data:

@@ -34,42 +34,71 @@ flowchart LR
     S -. optional, debugging only .-> SRV[spillway serve<br/>FastAPI :8100]
 ```
 
-Production flow: **train offline** (manual, about monthly, ~20 min) -> **`spillway publish` on a
-schedule** (daily, after the monthly `spillway-data` publish) writes the next 168 h of every series
-to Postgres -> the API reads the latest `ready` run -> the web only calls the API. The publisher
-connects as its own role `energia_forecast` (INSERT/DELETE on the three tables, UPDATE only on
-`forecast_model.is_current` and `forecast_run.status`, SELECT on the rest; grants live in
-`spillway-infra`, tables and migration `0007` in `spillway-api`). `spillway serve` is only a
-debugging tool and is not part of the production path.
+Production flow, all automatic once the worker runs (`docker compose up -d forecast-worker`):
+
+1. **`spillway watch`** checks every 60 minutes (a few HEAD requests and one SQL query, ~3 s when
+   nothing changed). When the ONS files of the current month changed, or silver has a new month,
+   it rebuilds the series (silver history + ONS tail, see Data), and **only if the data reach a
+   day later than the latest published run** it publishes: `forecast_model` / `forecast_run` /
+   `forecast_hourly` in one transaction, then `POST /v1/admin/revalidate {"tags": ["forecast"]}`
+   so the API drops its cache and the web refetches at once.
+2. **`spillway retrain`** is started by the same worker once a day in a subprocess (the hourly
+   refresh is never blocked). It retrains only when silver holds a complete month newer than the
+   model's data and 25 days passed since the last training; a promotion gate decides whether the
+   new model replaces the current one (see Monthly retraining).
+3. The API serves the hours from *now* (Brasilia time) onwards of the latest ready run, with
+   `valid_from`/`valid_to`, `data_through` and `generated_at`; the web shows the real week.
+
+The publisher connects as its own role `energia_forecast` (INSERT/DELETE on the three tables,
+UPDATE only on `forecast_model.is_current` and `forecast_run.status`, SELECT on the rest; grants
+live in `spillway-infra`, tables and migration `0007` in `spillway-api`). `spillway serve` is only
+a debugging tool and is not part of the production path. Airflow is deliberately not involved
+(no ML dependencies in its image): the worker polls, so a new ONS day reaches the page within
+the polling interval plus ~40 s, and the monthly pipeline run is noticed through the new silver
+month.
 
 ## Data
 
-* **Source: the silver layer of `spillway-data`** (SeaweedFS lake, S3 API at
-  `http://localhost:8333`, bucket `energy-lake`):
-  `silver/{wind,solar}_cluster_curtailment/year=YYYY/month=MM/data.parquet`. Silver is typed,
-  deduplicated, has invalid rows quarantined, keeps Brasilia local time (`measured_at`) and UTC,
-  and already models curtailment: `curtailed_mwh = max(GNRa, 0) x 0.5`, `generation_mwh =
-  verified generation x 0.5`. Nothing else is needed from the pipeline.
+* **Source: hybrid.** The hourly series are the **silver layer of `spillway-data`** (SeaweedFS
+  lake, S3 API at `http://localhost:8333`, bucket `energy-lake`:
+  `silver/{wind,solar}_cluster_curtailment/year=YYYY/month=MM/data.parquet`) for every complete
+  month, **plus a provisional tail taken straight from the ONS open data** for the months after
+  the last silver month. Silver only holds complete months (the pipeline loads the previous
+  month), which would make every forecast start ~4 weeks in the past; ONS fills the current
+  month's file up to about yesterday.
+  * Silver is typed, deduplicated, has invalid rows quarantined, keeps Brasilia local time and UTC,
+    and models curtailment: `curtailed_mwh = max(GNRa, 0) x 0.5`, `generation_mwh = verified
+    generation x 0.5`. The ONS tail uses the same aggregation (`aggregate_raw`), so definitions
+    match.
+  * Tail rows are flagged `provisional` in `hourly.parquet` (ONS revises them) and trimmed to
+    complete days; `data/processed/hourly_meta.json` records the boundary, the ONS ETags and the
+    overlap check.
+  * **Overlap check**: for the last silver month the direct ONS file is aggregated and compared
+    with silver. Measured on 2026-09: maximum absolute difference 5e-12 MWh (floating point
+    noise) on 10,800 wind and 9,360 solar hours: the two sources agree. If they ever disagree,
+    silver wins and the deviation is logged.
+  * The reconcile command ignores provisional rows (they are not in the warehouse).
 * What is derived here: the hourly aggregation per state, subsystem and SIN (the pipeline only
-  publishes monthly aggregates), written to `data/processed/hourly.parquet` (~850k rows, a few MB).
+  publishes monthly aggregates), written to `data/processed/hourly.parquet` (~850k rows).
 * **Lake access** (`src/spillway_forecast/silver.py`): boto3 with *path-style* addressing, explicit
   region `us-east-1` and the static keys (`LAKE_S3_ENDPOINT_URL`, `LAKE_BUCKET`,
   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`; defaults are the local
   docker-compose values). The earlier `AccessDenied` came from not sending the keys / using the
   wrong addressing; with the pipeline's configuration it works. Install with `uv sync --extra lake`.
-* The old direct-ONS loader (`spillway ingest --from ons`) is kept as a fallback only (e.g. when
-  the lake is not available); it produces the same schema and the same definitions.
+* `spillway ingest` is hybrid by default; `--from silver` (validated months only) and
+  `--from ons` (everything from ONS, a fallback when the lake is unavailable) are still available.
 * **Reconciliation** (`uv run spillway reconcile`, read-only SELECT on the warehouse): the monthly
   sums of the hourly series equal `state_monthly_curtailment` (805 state-month rows) and
   `subsystem_monthly_curtailment` incl. the SIN rows (346 rows) for every wind and solar month:
   no missing months in either direction, maximum absolute difference 0.0005 MWh (the warehouse
   rounds to 3 decimals), maximum relative difference 1.6e-4 on tiny months and 2.7e-8 for
   generation. See `reports/reconcile.txt`.
-* Real history actually used: **wind 2021-10 to 2026-09-30 (~5 years, 15 series)**, **solar 2024-04
-  to 2026-09-30 (~2.5 years, 12 modelled series)**, 28 series exist and 27 are modelled (solar MS has under 120 days of history and is dropped). The lake holds
-  complete months only, so the data now ends on 2026-09-30 (the previous direct-ONS run went to
-  2026-10-27): the final test period is shorter (2026-04..2026-09) and a forecast made today starts
-  from stale data. The API/web report `stale_days`.
+* **History actually used (all of it, every year):** wind **2021-10-01 to 2026-10-27** (~5 years,
+  15 series: 10 states, 4 subsystems, SIN) and solar **2024-04-01 to 2026-10-27** (~2.5 years, when
+  ONS started publishing it; 13 series, of which 12 are modelled: solar MS has under 120 days of
+  history and is dropped). Validated silver covers up to 2026-09-30; the 27 days after it
+  (18,144 hourly rows) are the provisional ONS tail. Nothing is sampled out: training rows are
+  built from every origin (every 3 days) of every series.
 * Nothing is synthetic. Unit tests use synthetic frames only to exercise code paths.
 * Target: `curtailed / (curtailed + generation)` per hour (undefined at night for solar, those
   hours are dropped and flagged `applicable=false`). Risk label: that value >= 10%.
@@ -97,30 +126,38 @@ source was integrated), which is the biggest known limitation.
 * `tests/test_features.py` proves no future data leaks into features: corrupting every
   observation at or after the origin leaves all history features unchanged.
 
-## Results (held-out test, 218k hour-forecasts, 2026-04 .. 2026-09)
+## Results (held-out test, 251k hour-forecasts, 2026-04-01 .. 2026-10-27)
 
 | Model | MAE (pp) | RMSE (pp) | ROC-AUC | PR-AUC | Brier | ECE |
 |---|---|---|---|---|---|---|
-| Climatology (baseline) | 13.65 | 23.76 | 0.841 | 0.775 | 0.2174 | 0.218 |
-| Seasonal naive (baseline) | 11.84 | 21.15 | 0.803 | 0.691 | 0.1900 | 0.190 |
-| **HistGradientBoosting** | **10.05** | **16.45** | **0.917** | **0.882** | **0.1156** | **0.036** |
+| Climatology (baseline) | 13.90 | 23.98 | 0.833 | 0.770 | 0.2204 | 0.218 |
+| Seasonal naive (baseline) | 12.07 | 21.23 | 0.801 | 0.691 | 0.1927 | 0.193 |
+| **HistGradientBoosting** | **10.15** | **16.43** | **0.915** | **0.877** | **0.1167** | **0.037** |
 
-Base rate of risk hours in the test period: 42%. Brier skill vs the base-rate forecast: 0.52
-(model), 0.22 (seasonal naive), 0.11 (climatology). Block-bootstrap (by week) 95% CI of
-model minus climatology: MAE -3.6 pp [-4.6, -2.5]; Brier -0.102 [-0.123, -0.081]. Versus
-seasonal naive: MAE -1.8 pp [-2.3, -1.4].
+Base rate of risk hours in the test period: 42%. Block-bootstrap (by week) 95% CI of model minus
+climatology: MAE -3.7 pp [-4.5, -2.8]; Brier -0.104 [-0.119, -0.087]. Versus seasonal naive: MAE
+-1.9 pp [-2.3, -1.5]; Brier -0.076 [-0.085, -0.067].
 
-**Versus the previous run (direct ONS download, test to 2026-10-27, 251k rows):** MAE 10.09 /
-13.90 / 12.07, ROC-AUC 0.915 / 0.833 / 0.801, ECE 0.038 / 0.218 / 0.193. The differences are small
-and come from the test window (October 2026 is no longer in the lake, so the test has 218k instead
-of 251k rows and the climatology baseline changed with it); the cross-validation folds are
-identical to the previous run (mean MAE 9.45 pp both times) because the lake and the direct ONS
-files agree. We do not claim any gain from the new source: it changes provenance, not accuracy.
+**History of the numbers.** First run (direct ONS download, same test window): MAE 10.09, AUC
+0.915, ECE 0.038. Silver only (test to 2026-09-30, 218k rows): MAE 10.05, AUC 0.917, ECE 0.036.
+Hybrid (silver + provisional ONS tail, this table): the test window is again the one of the first
+run and the numbers agree with it within noise (the model is refitted, not identical). The
+source change brings freshness, not accuracy, and no gain is claimed from it.
+
+**Effect of the provisional tail.** The only test targets that are provisional are those of
+October 2026 (the last 27 days). Per target month, model MAE is 10.3 / 9.9 / 10.2 / 9.2 / 10.1 /
+10.7 pp for April-September and **10.9 pp for October** (ROC-AUC 0.90, inside the 0.88-0.94 range of
+the other months); climatology is 15.5 pp in October. So the provisional month is
+slightly harder but nowhere near enough to change any conclusion; we cannot separate "provisional"
+from "October" with this data. Silver and a fresh ONS download agree to floating-point precision
+for September, so revisions of already published days look small, but ONS may still revise the
+newest days after the forecast was made.
 
 Rolling-origin CV (mean of 5 folds): MAE 9.45 / 11.54 / 10.61 pp and ROC-AUC 0.891 / 0.804 /
-0.757 for model / climatology / seasonal naive. Reliability plot: `reports/figures/calibration.png`
-(the bins are also published to the website). Full numbers (per fold, source, forecast day,
-permutation importance, calibration bins): `reports/results.json`.
+0.757 for model / climatology / seasonal naive (identical to the previous runs: the folds end
+before 2026-04). Reliability plot: `reports/figures/calibration.png`. Full numbers (per fold,
+source, forecast day, target month, permutation importance, calibration bins):
+`reports/results.json`. A full retrain took **12.5 minutes** (752 s) on this machine.
 
 Honest caveats:
 
@@ -138,32 +175,80 @@ Honest caveats:
 
 ```bash
 uv sync --extra lake --extra warehouse
-uv run spillway ingest            # silver layer (lake) -> data/processed/hourly.parquet
-uv run spillway ingest --from ons # fallback: download the raw ONS files directly
-uv run spillway reconcile         # monthly sums vs the warehouse tables (read-only)
-uv run spillway train             # backtest + MLflow + models/bundle.joblib + reports/results.json (~20 min)
-uv run spillway publish --dsn postgresql://USER:PASS@HOST:5433/warehouse   # writes the forecast (see below)
-uv run spillway register --run-id <id>   # only if registration was skipped / failed
-uv run mlflow ui --backend-store-uri sqlite:///mlflow.db   # browse runs and the model registry
+uv run spillway ingest            # silver history + ONS tail -> data/processed/hourly.parquet
+uv run spillway reconcile         # silver months vs the warehouse tables (read-only)
+uv run spillway train             # backtest + MLflow + models/bundle.joblib + reports/results.json (~13 min)
+uv run spillway publish --dsn postgresql://USER:PASS@HOST:5433/warehouse   # one-off publish
+uv run spillway refresh           # publish only if new ONS data arrived, then tell the API
+uv run spillway watch --every 60  # the loop the worker runs
+uv run spillway retrain --dry-run # what the monthly retrain would do now
+uv run mlflow ui --backend-store-uri sqlite:///mlflow.db
 
 uv run pytest && uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
-**Publishing.** `spillway publish` needs the `spillway-api` migration `0007` applied. It scores all
-series from one common origin (the day after the latest observed day), inserts the model row (once
-per MLflow run), a run in `loading`, copies the hourly rows, flips the run to `ready`, marks the
-model current and keeps the last 14 runs, all in **one transaction**; running it twice for the same
-model and origin is a no-op. It reads `reports/results.json` and `models/bundle.joblib`
-(the MLflow registry holds the same estimators; the bundle is what the service loads). Use
-`--dsn` or `PUBLISH_DSN` (role `energia_forecast` in production, the warehouse user locally).
-Schedule it daily after the monthly `spillway-data` publish; retraining is manual.
+`publish` needs the `spillway-api` migration `0007`. It scores all series from one common origin
+(the day after the latest observed day), inserts the model row (once per MLflow run), a run in
+`loading`, copies the hourly rows, flips the run to `ready`, marks the model current and keeps
+the last 14 runs, all in **one transaction**; running it twice for the same model and origin is a
+no-op.
 
-The API serves it: `GET /v1/forecast?scope=NE&source=wind&days=7`, `GET /v1/forecast/scopes` and
-`GET /v1/forecast/model` (training results for the website: data period, metrics baseline vs model
-with bootstrap intervals, calibration bins, feature importance, limitations).
+### The worker (starts by itself, you decide when)
 
-**Debugging service (optional).** `uv run spillway serve --port 8100` exposes the same scoring over
-HTTP (`GET /v1/forecast`, `/v1/scopes`, `/v1/model`, `/health`); it is not used in production.
+```bash
+docker compose up -d --build forecast-worker   # builds the image, starts `spillway watch --every 60`
+docker compose logs -f forecast-worker
+docker compose stop forecast-worker            # SIGTERM: it finishes the current step and exits
+```
+
+`docker-compose.yml` joins the external network `energia-data_default` so the container reaches
+`lake:8333` and `warehouse-db:5432` with the pipeline's credentials (env `LAKE_ACCESS_KEY`,
+`LAKE_SECRET_KEY`, `PUBLISH_DSN`; defaults `lakeadmin`/`lakesecret` and `warehouse`/`warehouse`),
+and posts to `API_URL` (default `http://host.docker.internal:8000`, optional Cognito machine token
+through `COGNITO_TOKEN_URL`, `DATA_CLIENT_ID`, `DATA_CLIENT_SECRET`, as in `spillway-data`).
+`models/` and `reports/` are mounted from the host (the trained bundle and results); a named
+volume keeps the hourly series and the MLflow database. In production the same image runs as one
+long-running ECS service (one task is enough; the advisory locks make extra tasks harmless) with a
+persistent volume (EFS) for `models/`, `reports/` and `/data`, `PUBLISH_DSN` of the
+`energia_forecast` role from Secrets Manager, and `API_URL` of the API service; no infra changed
+here.
+
+Each check logs one line, e.g. `refresh: up-to-date: no change in ONS files or silver (2.8 s)` or
+`refresh: new data -> published run 2 (data through 2026-10-27, 4536 rows, 31.4 s, api=...)`.
+Errors never stop the loop: exponential backoff (1, 2, 4... minutes, capped at the interval), one
+log line per attempt. `FORECAST_MODEL_MAX_AGE_DAYS` (45) makes the refresh log a warning when the
+published model is older than that.
+
+## Monthly retraining (automatic)
+
+```
+ONS monthly file -> spillway-data DAG (day 3, 06:00): silver -> gold -> report published and e-mailed
+  -> the worker's daily check sees a complete month newer than the model's data
+  -> spillway retrain: ingest -> same protocol as `train` -> promotion gate
+  -> promote + publish (forecast_model.is_current flips in the publish transaction) + API revalidate
+  -> the website shows the new model card and metrics
+```
+
+* **Trigger** (`retrain.decide_trigger`): silver has a complete month ending after the data the
+  current model was trained on, **and** at least 25 days since the last training (a DAG re-run
+  never retrains twice). `--force` skips both rules, `--dry-run` only reports.
+* **Gate** (`retrain.gate`, constants `GATE_MAX_AUC_DROP=0.01`, `GATE_MAX_MAE_RISE_PP=0.3`,
+  `GATE_MAX_ECE_RISE=0.02`, `MIN_GATE_ROWS=2000`): candidate and incumbent are scored on the same
+  new window, the days after the incumbent's training data, which neither has seen (the candidate
+  is re-fitted only on data before that window). The candidate is promoted only if it is not
+  worse beyond those tolerances **and** on its own final test it beats climatology with a 95%
+  block-bootstrap interval below zero for both absolute error and Brier score.
+* **Rejection**: the current model and bundle stay, the reasons are logged, written to
+  `reports/retrain_last.json` and tagged on the MLflow run (`gate`, `gate_reasons`). They are not
+  surfaced on the website: that would need a schema change and the contract was kept as is.
+* **Promotion** is atomic (temp file + rename), keeps `bundle.previous.joblib` and
+  `results.previous.json`, registers the model in MLflow and publishes under the publish lock.
+  The committed `MODEL_CARD.md` and this README are never rewritten by the worker; the website
+  reads the numbers from the database.
+* **Safety**: Postgres advisory locks (a second retrain or a publish during a promotion waits or
+  skips), retraining runs in a subprocess with a time limit (3 h) so the hourly refresh keeps
+  serving with the old model, and any failure leaves bundle, results and database untouched
+  (tested). Manual override at any time: `uv run spillway retrain --force`.
 
 ## What I learned
 

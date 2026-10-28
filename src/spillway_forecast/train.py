@@ -31,7 +31,7 @@ from spillway_forecast.metrics import (
     paired_block_bootstrap,
     reliability_table,
 )
-from spillway_forecast.model import GBM_PARAMS, ForecastModel
+from spillway_forecast.model import BUNDLE_NAME, GBM_PARAMS, ForecastModel
 from spillway_forecast.validation import Split, cv_splits, final_split
 
 MODELS = ("climatology", "seasonal_naive", "hist_gbm")
@@ -115,7 +115,11 @@ def train(
     *,
     register: bool = True,
     hourly: pd.DataFrame | None = None,
+    models_dir: Path | None = None,
+    reports_dir: Path | None = None,
 ) -> dict[str, Any]:
+    """Run the full protocol. Output goes to ``models_dir`` / ``reports_dir`` when given."""
+    reports = reports_dir or REPORTS
     if hourly is None:
         hourly = pd.read_parquet(config.hourly_path())
     series_list = to_series(hourly)
@@ -170,6 +174,7 @@ def train(
         for m in MODELS:
             mlflow.log_metrics({f"test_{m}_{k}": v for k, v in test[m].items()})
         by_source = _breakdown(t_rows, t_preds, t_rows["source"])
+        by_month = _breakdown(t_rows, t_preds, t_rows["target_ts"].dt.to_period("M").astype(str))
         by_day = _breakdown(t_rows, t_preds, ((t_rows["horizon_h"] - 1) // 24 + 1).astype(int))
         weeks = t_rows["origin"].dt.to_period("W").astype(str).to_numpy()
         blocks = pd.factorize(weeks)[0].astype(np.int64)
@@ -255,16 +260,17 @@ def train(
             "test": test,
             "test_by_source": by_source,
             "test_by_horizon_day": by_day,
+            "test_by_target_month": by_month,
             "test_bootstrap": bootstrap,
             "permutation_importance_brier": importances.to_dict(),
         }
-        REPORTS.mkdir(exist_ok=True)
-        (REPORTS / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-        calibration_figure(t_rows, t_preds, REPORTS / "figures" / "calibration.png")
-        mlflow.log_artifact(str(REPORTS / "results.json"))
-        mlflow.log_artifact(str(REPORTS / "figures" / "calibration.png"))
+        reports.mkdir(parents=True, exist_ok=True)
+        (reports / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
+        calibration_figure(t_rows, t_preds, reports / "figures" / "calibration.png")
+        mlflow.log_artifact(str(reports / "results.json"))
+        mlflow.log_artifact(str(reports / "figures" / "calibration.png"))
 
-        bundle_path = final.save()
+        bundle_path = final.save(models_dir / BUNDLE_NAME if models_dir else None)
         mlflow.log_artifact(str(bundle_path))
         if register:
             assert final.classifier is not None and final.regressor is not None
@@ -283,9 +289,9 @@ def train(
     return results
 
 
-def register_bundle(run_id: str | None = None) -> None:
+def register_bundle(run_id: str | None = None, path: Path | None = None) -> None:
     """Register the saved bundle's two estimators (resume the backtest run when given)."""
-    model = ForecastModel.load()
+    model = ForecastModel.load(path)
     assert model.classifier is not None and model.regressor is not None
     mlflow.set_tracking_uri(config.mlflow_uri())
     mlflow.set_experiment(EXPERIMENT)

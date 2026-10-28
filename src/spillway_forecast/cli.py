@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
+import sys
 from datetime import date
 
 import pandas as pd
@@ -22,6 +24,8 @@ def reconcile(dsn: str | None = None, tolerance: float = 0.001) -> int:
         "WAREHOUSE_DSN", "postgresql://warehouse:warehouse@localhost:5433/warehouse"
     )
     hourly = pd.read_parquet(config.hourly_path())
+    if "provisional" in hourly:  # the ONS tail is not in the warehouse (complete months only)
+        hourly = hourly[~hourly["provisional"]].copy()
     hourly["month"] = hourly["ts"].dt.to_period("M").dt.to_timestamp()
     bad_total = 0
     for scope_type, table, col in (
@@ -73,14 +77,30 @@ def reconcile(dsn: str | None = None, tolerance: float = 0.001) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="spillway")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p_ing = sub.add_parser("ingest", help="build the hourly series (default: silver layer)")
-    p_ing.add_argument("--from", dest="origin", choices=["silver", "ons"], default="silver")
+    p_ing = sub.add_parser("ingest", help="build the hourly series (default: silver + ONS tail)")
+    p_ing.add_argument(
+        "--from", dest="origin", choices=["hybrid", "silver", "ons"], default="hybrid"
+    )
     p_ing.add_argument("--refresh-last", type=int, default=2)
     p_train = sub.add_parser("train", help="backtest, track in MLflow and register the model")
     p_train.add_argument("--no-register", action="store_true")
     p_serve = sub.add_parser("serve", help="run the FastAPI service")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8100)
+    p_ref = sub.add_parser("refresh", help="publish a new forecast if new ONS data arrived")
+    p_ref.add_argument("--dsn", default=None)
+    p_ref.add_argument("--force", action="store_true")
+    p_watch = sub.add_parser("watch", help="refresh every N minutes, retrain monthly")
+    p_watch.add_argument("--dsn", default=None)
+    p_watch.add_argument("--every", type=float, default=60.0, help="minutes between checks")
+    p_watch.add_argument("--once", action="store_true", help="single iteration (testing)")
+    p_re = sub.add_parser("retrain", help="retrain, gate and promote the model if due")
+    p_re.add_argument("--dsn", default=None)
+    p_re.add_argument("--force", action="store_true", help="ignore the trigger rules")
+    p_re.add_argument("--dry-run", action="store_true", help="only report what would happen")
+    p_re.add_argument("--fast", action="store_true", help="DEMO configuration, not a valid model")
+    p_re.add_argument("--models-dir", default=None)
+    p_re.add_argument("--reports-dir", default=None)
     p_pub = sub.add_parser("publish", help="score all series and write them to the warehouse")
     p_pub.add_argument("--dsn", default=None, help="Postgres DSN (or env PUBLISH_DSN)")
     p_pub.add_argument("--keep-runs", type=int, default=14)
@@ -88,11 +108,23 @@ def main() -> None:
     p_reg.add_argument("--run-id", default=None)
     sub.add_parser("reconcile", help="check hourly aggregation against the warehouse")
     args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    if getattr(args, "models_dir", None):
+        os.environ["SPILLWAY_MODELS_DIR"] = args.models_dir
+    if getattr(args, "reports_dir", None):
+        os.environ["SPILLWAY_REPORTS_DIR"] = args.reports_dir
 
     if args.cmd == "ingest":
         from spillway_forecast import ingest as ing
 
-        if args.origin == "silver":
+        if args.origin == "hybrid":
+            print(ing.ingest_hybrid(today=date.today()))
+        elif args.origin == "silver":
             print(ing.ingest_silver(today=date.today()))
         else:
             print(ing.ingest(refresh_last=args.refresh_last, today=date.today()))
@@ -104,6 +136,19 @@ def main() -> None:
         import uvicorn
 
         uvicorn.run("spillway_forecast.api:app", host=args.host, port=args.port)
+    elif args.cmd == "refresh":
+        from spillway_forecast.refresh import refresh
+
+        print(refresh(args.dsn, force=args.force))
+    elif args.cmd == "watch":
+        from spillway_forecast.refresh import watch
+
+        watch(args.every, dsn=args.dsn, once=args.once)
+    elif args.cmd == "retrain":
+        from spillway_forecast.retrain import retrain
+
+        outcome = retrain(args.dsn, force=args.force, dry_run=args.dry_run, fast=args.fast)
+        print({k: v for k, v in outcome.items() if k in ("status", "reason", "reasons", "go")})
     elif args.cmd == "publish":
         from spillway_forecast.publish import publish
 
