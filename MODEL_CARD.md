@@ -13,20 +13,22 @@ min 200 samples per leaf, L2 = 1, no early stopping, seed 42.
 ## Intended use
 
 * Decision support and analysis: which hours of the next 1-7 days are more likely to be curtailed
-  for wind or solar in a state or subsystem; shown in the members Analyses page of Spillway.
+  for wind or solar in a state or subsystem; shown in the members-only `/previsao` page of Spillway.
 * **Not** intended for: trading or dispatch decisions without human review, regulatory or
   contractual claims about compensation, plant-level (single plant) forecasts, horizons
   beyond 7 days.
 
 ## Data
 
-ONS open data `restricao_coff_eolica_tm` (from 2021-10) and `restricao_coff_fotovoltaica_tm`
-(from 2024-04) up to 2026-10-27, 30-minute cluster rows aggregated to hourly state, subsystem and
-SIN series. Curtailed energy is the official "geração não realizada apurada" (GNRa) and
-generation is the verified generation, as in `energia-data`. 27 series, 1.62 M forecast rows
-(origins every 3 days x 168 horizons), 251 k rows in the final test.
+Silver layer of `spillway-data` (typed, deduplicated, invalid rows quarantined; read from the lake
+over S3): `wind_cluster_curtailment` (from 2021-10) and `solar_cluster_curtailment` (from 2024-04)
+up to 2026-09-30, 30-minute cluster rows aggregated to hourly state, subsystem and SIN series.
+Curtailed energy is the official "geracao nao realizada apurada" (GNRa) and generation is the
+verified generation, exactly the pipeline's `curtailed_mwh` / `generation_mwh`; the monthly sums
+reconcile with the warehouse tables (max difference 0.0005 MWh). 27 modelled series (solar MS has under 120 days of history and is dropped), 1.59 M forecast rows
+(origins every 3 days x 168 horizons), 218 k rows in the final test.
 Hours where the denominator (curtailed + generated) is under 1 MWh (night-time solar) are
-excluded from training and evaluation and reported as "not applicable" by the API.
+excluded from training and evaluation and reported as "not applicable".
 
 ## Features
 
@@ -40,7 +42,7 @@ same hour last week. No weather, no price, no load, no outage information.
 
 * Rolling-origin, expanding-window backtest with 5 folds of 3 months (2025-01 .. 2026-03).
   Training rows must have their *target hour* before the fold start (7-day embargo).
-* Final held-out test 2026-04-01 .. 2026-10-27, untouched by development; hyper-parameters
+* Final held-out test 2026-04-01 .. 2026-09-30, untouched by development; hyper-parameters
   were not tuned.
 * Baselines: climatology by series x month x weekday/weekend x hour (fitted on unique hourly
   observations before the split) and seasonal naive (same hour last week).
@@ -52,16 +54,19 @@ same hour last week. No weather, no price, no load, no outage information.
 
 | Model | MAE (pp) | RMSE (pp) | ROC-AUC | PR-AUC | Brier | ECE |
 |---|---|---|---|---|---|---|
-| Climatology | 13.90 | 23.98 | 0.833 | 0.770 | 0.2204 | 0.218 |
-| Seasonal naive | 12.07 | 21.23 | 0.801 | 0.691 | 0.1927 | 0.193 |
-| HistGradientBoosting | 10.09 | 16.30 | 0.915 | 0.875 | 0.1173 | 0.038 |
+| Climatology | 13.65 | 23.76 | 0.841 | 0.775 | 0.2174 | 0.218 |
+| Seasonal naive | 11.84 | 21.15 | 0.803 | 0.691 | 0.1900 | 0.190 |
+| HistGradientBoosting | 10.05 | 16.45 | 0.917 | 0.882 | 0.1156 | 0.036 |
 
+Paired block bootstrap (weeks), model minus climatology: MAE -3.6 pp [-4.6, -2.5], Brier -0.102
+[-0.123, -0.081]; minus seasonal naive: MAE -1.8 pp [-2.3, -1.4].
 Risk base rate in the test: 42% (32% on average across the CV folds).
-By source (test): wind AUC 0.922 / Brier 0.110 / MAE 9.7 pp; solar AUC 0.894 / Brier 0.132 /
-MAE 10.9 pp. By forecast day: AUC 0.918 (day 1) to 0.905 (day 7); MAE 9.7 to 10.2 pp.
+By source (test): wind AUC 0.921 / Brier 0.111 / MAE 9.8 pp (climatology 14.1); solar AUC 0.903 /
+Brier 0.127 / MAE 10.6 pp (climatology 12.7). By forecast day: AUC 0.921 (day 1) to 0.907 (day 7).
 Rolling CV (mean over folds): MAE 9.45 (model) vs 11.54 (climatology) vs 10.61 (seasonal naive);
 AUC 0.891 vs 0.804 vs 0.757. Source of all numbers: `reports/results.json`, MLflow run
-`backtest`.
+`backtest`. The previous run (direct ONS download, test to 2026-10-27) gave 10.09 / 13.90 / 12.07
+pp MAE; the change comes from the shorter test window, not from the new source.
 
 **Where the model does not clearly win:** on the curtailment percentage the improvement over
 climatology is small in some periods; in CV fold 1 (2025-01..03) the model's MAE (10.57 pp) was
@@ -81,8 +86,9 @@ and its calibration.
 * The ONS "apurada" figures are revised; the last month of data may change.
 * The risk threshold (10%) and the display levels (low < 0.33 <= medium < 0.66 <= high) are
   conventions, not calibrated decision thresholds.
-* Operational: the forecast starts the day after the last observation. If ingestion is behind,
-  the API returns `stale_days > 0` and the UI warns the user.
+* Operational: the forecast starts the day after the last observation. The lake receives complete
+  months, so the forecast can be weeks stale; the API returns `stale_days` and `generated_at` and
+  the UI warns the user.
 * Hourly values are in ONS local time and aggregated from 30-minute rows.
 
 ## Ethical and operational considerations
@@ -95,8 +101,10 @@ curtailed (reliability vs energy reasons) or whether it will be compensated.
 ## How to retrain
 
 ```bash
-uv run spillway ingest   # refreshes the last 2 months and fetches new ones
+uv run spillway ingest   # re-reads the silver layer of the lake
+uv run spillway reconcile
 uv run spillway train    # backtest, report, MLflow run, registry, models/bundle.joblib
+uv run spillway publish --dsn ...  # score and publish to the warehouse
 ```
 
 Update `test_start`/`fold_starts` in `src/spillway_forecast/config.py` when moving the held-out

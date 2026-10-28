@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -213,8 +214,32 @@ def train(
             pd.Series(imp.importances_mean, index=FEATURES).sort_values(ascending=False).round(5)
         )
 
+        calibration = {
+            name: reliability_table(
+                t_rows["risk"].to_numpy(float),
+                np.clip(t_preds[name]["risk"].to_numpy(float), 0, 1),
+            )
+            .round(4)
+            .to_dict(orient="records")
+            for name in MODELS
+        }
+        period = {
+            str(src): {
+                "start": str(g["ts"].min()),
+                "end": str(g["ts"].max()),
+                "n_series": int(g.groupby(["scope_type", "scope"]).ngroups),
+            }
+            for src, g in hourly[
+                (hourly["source"] + ":" + hourly["scope"]).isin(series_ids)
+            ].groupby("source")
+        }
         results = {
             "run_id": run.info.run_id,
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "data_source": "silver layer of spillway-data (S3 / SeaweedFS)",
+            "period_by_source": period,
+            "test_calibration": calibration,
+            "test_base_rate": float(t_rows["risk"].mean()),
             "data": {
                 "start": str(hourly["ts"].min()),
                 "end": str(hourly["ts"].max()),

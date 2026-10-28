@@ -1,4 +1,6 @@
-"""Download ONS constrained-off (curtailment) open data and aggregate it to hourly series.
+"""Fallback ingestion straight from ONS (default is the silver layer, see ``silver.py``).
+
+Download ONS constrained-off (curtailment) open data and aggregate it to hourly series.
 
 Source: ONS open data, datasets ``restricao_coff_eolica_tm`` and
 ``restricao_coff_fotovoltaica_tm`` (one parquet per month, 30-minute rows per wind/solar
@@ -83,6 +85,17 @@ def _download(url: str, destination: Path) -> bool:
             for chunk in response.iter_bytes():
                 handle.write(chunk)
     return True
+
+
+def ingest_silver(today: date | None = None) -> Path:
+    """Default ingestion: build ``hourly.parquet`` from the silver layer of the lake."""
+    from spillway_forecast.silver import read_silver_hourly
+
+    frame = read_silver_hourly(today)
+    out = hourly_path()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    frame.write_parquet(out)
+    return out
 
 
 def ingest(

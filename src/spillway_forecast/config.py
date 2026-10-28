@@ -18,6 +18,19 @@ ONS_DATASETS: dict[str, tuple[str, str, tuple[int, int]]] = {
     "solar": ("restricao_coff_fotovoltaica_tm", "RESTRICAO_COFF_FOTOVOLTAICA", (2024, 4)),
 }
 
+# Silver layer of the spillway-data lake (SeaweedFS, S3 API). Same env vars as the pipeline.
+LAKE_PREFIXES = {
+    "wind": "silver/wind_cluster_curtailment",
+    "solar": "silver/solar_cluster_curtailment",
+}
+LAKE_DEFAULTS = {
+    "endpoint": "http://localhost:8333",
+    "bucket": "energy-lake",
+    "access_key": "lakeadmin",
+    "secret_key": "lakesecret",
+    "region": "us-east-1",
+}
+
 HORIZON_HOURS = 168  # forecast issued at 00:00 covers the next 7 days
 MIN_DENOMINATOR_MWH = 1.0  # below this (night-time solar) the curtailment % is undefined
 RISK_THRESHOLD = 0.10  # an hour is "at risk" when >= 10% of potential output is cut

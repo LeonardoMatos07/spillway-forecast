@@ -1,0 +1,10 @@
+== state: 805 month rows compared (tolerance 0.10%)
+   only in warehouse: 0, only in hourly series: 0
+   max |diff| curtailed MWh: 0.0005, max rel: 1.58e-04
+   max |diff| generation MWh: 0.0005, max rel: 2.68e-08
+   rows above tolerance: 0
+== subsystem+SIN: 346 month rows compared (tolerance 0.10%)
+   only in warehouse: 0, only in hourly series: 0
+   max |diff| curtailed MWh: 0.0005, max rel: 2.42e-05
+   max |diff| generation MWh: 0.0005, max rel: 2.68e-08
+   rows above tolerance: 0
