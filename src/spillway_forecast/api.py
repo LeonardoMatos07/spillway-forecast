@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Annotated, Literal
@@ -70,6 +71,23 @@ def create_router(get_service: Callable[[], ForecastService] = default_service) 
             return get_service().scopes()
         except FileNotFoundError as exc:
             raise HTTPException(503, "model or history not available") from exc
+
+    @router.get("/model")
+    def model_info() -> dict[str, object]:
+        """Training results (same content the publisher writes to ``forecast_model``)."""
+        import json
+
+        from spillway_forecast.publish import model_row, results_path
+
+        try:
+            results = json.loads(results_path().read_text(encoding="utf-8"))
+            service = get_service()
+        except FileNotFoundError as exc:
+            raise HTTPException(503, "no training results available; run training") from exc
+        per_source = dict(Counter(x.source for x in service.series.values()))
+        row = model_row(results, len(service.series), int(results["data"]["rows"]), per_source)
+        row["trained_at"] = row["trained_at"].isoformat()
+        return row
 
     return router
 

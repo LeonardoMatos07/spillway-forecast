@@ -19,6 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+lake = [
+    "boto3>=1.40",
+]
 warehouse = [
     "psycopg[binary]>=3.3.6",
 ]
@@ -48,13 +51,16 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF", "DTZ"]
 ignore = ["DTZ011"]  # naive calendar dates are intended (ONS data is in local time)
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["DTZ001"]
+
 [tool.mypy]
 python_version = "3.12"
 files = ["src", "tests"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["mlflow", "mlflow.*", "sklearn", "sklearn.*", "matplotlib", "matplotlib.*", "holidays", "joblib"]
+module = ["boto3", "botocore", "botocore.*", "psycopg", "mlflow", "mlflow.*", "sklearn", "sklearn.*", "matplotlib", "matplotlib.*", "holidays", "joblib"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
