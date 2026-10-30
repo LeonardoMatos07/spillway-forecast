@@ -107,6 +107,13 @@ def main() -> None:
     p_reg = sub.add_parser("register", help="register the saved model bundle in MLflow")
     p_reg.add_argument("--run-id", default=None)
     sub.add_parser("reconcile", help="check hourly aggregation against the warehouse")
+    p_ds = sub.add_parser("inflow-dataset", help="build the versioned inflow training set")
+    p_ds.add_argument("--reservoir-daily", required=True, help="parquet of reservoir_daily")
+    p_ds.add_argument("--register", required=True, help="parquet of the reservoir table")
+    p_ds.add_argument("--rain", default=None, help="parquet of the IMERG rain (spillway-data)")
+    p_ds.add_argument("--out", required=True)
+    p_ds.add_argument("--reservoir", action="append", help="restrict to these reservoir ids")
+    p_ds.add_argument("--rain-lag-days", type=int, default=46)
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -128,6 +135,23 @@ def main() -> None:
             print(ing.ingest_silver(today=date.today()))
         else:
             print(ing.ingest(refresh_last=args.refresh_last, today=date.today()))
+    elif args.cmd == "inflow-dataset":
+        from pathlib import Path
+
+        import polars as pl
+
+        from spillway_forecast import inflow_dataset as ds
+
+        daily = pl.read_parquet(args.reservoir_daily)
+        register = pl.read_parquet(args.register)
+        rain = pl.read_parquet(args.rain) if args.rain else None
+        cfg = ds.DatasetConfig(
+            reservoirs=tuple(args.reservoir) if args.reservoir else None,
+            rain_lag_days=args.rain_lag_days,
+        )
+        features = ds.build_features(daily, register, cfg, rain)
+        inputs = {"reservoir_daily": daily, "register": register, "rain": rain}
+        print(ds.write_dataset(features, cfg, inputs, Path(args.out)))
     elif args.cmd == "train":
         from spillway_forecast.train import train
 
