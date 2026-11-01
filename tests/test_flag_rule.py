@@ -72,7 +72,15 @@ def test_invalid_inputs() -> None:
     with pytest.raises(ValueError, match="exceed"):
         compute_bands("10", "5", "0.5")
     with pytest.raises(ValueError, match="gsf"):
-        compute_bands("5", "10", "1.0")
+        compute_bands("5", "10", "-0.1")
+
+
+def test_gsf_at_or_above_one_makes_everything_green() -> None:
+    # bulletins 94 and 95 (feb and mar 2026): GSF 1.00 and 1.03
+    for gsf in ("1.00", "1.03"):
+        bands = compute_bands("57.31", "785.27", gsf)
+        assert bands.green_upper == bands.yellow_upper == bands.red1_upper == Dec("785.27")
+        assert flag_from_trigger(bands, "785.27") is Flag.GREEN
 
 
 def test_full_chain_from_gh_gf() -> None:
