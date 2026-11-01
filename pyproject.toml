@@ -63,6 +63,11 @@ strict = true
 module = ["boto3", "botocore", "botocore.*", "psycopg", "psycopg.*", "mlflow", "mlflow.*", "sklearn", "sklearn.*", "matplotlib", "matplotlib.*", "holidays", "joblib"]
 ignore_missing_imports = true
 
+# pandas row access (itertuples/iterrows) is untyped in the stubs: relax only these codes here
+[[tool.mypy.overrides]]
+module = ["spillway_forecast.flag_eval", "spillway_forecast.flag_backtest"]
+disable_error_code = ["arg-type", "assignment", "operator", "no-any-return", "str-bytes-safe"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
