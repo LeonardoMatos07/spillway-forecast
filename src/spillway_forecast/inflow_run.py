@@ -53,6 +53,7 @@ def run(dataset_dir: Path, out_dir: Path) -> dict[str, Any]:
 
     forecasts = pl.concat(frames)
     out_dir.mkdir(parents=True, exist_ok=True)
+    forecasts.write_parquet(out_dir / "forecasts.parquet")  # large, local only
     tables = {s: ev.per_reservoir(forecasts, s) for s in ("valid", "test")}
     for s, t in tables.items():
         t.write_parquet(out_dir / f"per_reservoir_{s}.parquet")
