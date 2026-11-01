@@ -114,6 +114,9 @@ def main() -> None:
     p_ds.add_argument("--out", required=True)
     p_ds.add_argument("--reservoir", action="append", help="restrict to these reservoir ids")
     p_ds.add_argument("--rain-lag-days", type=int, default=46)
+    p_ev = sub.add_parser("inflow-evaluate", help="stage 2: references vs ridge vs boosting")
+    p_ev.add_argument("--dataset", required=True, help="dataset directory (features.parquet)")
+    p_ev.add_argument("--out", required=True)
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -152,6 +155,12 @@ def main() -> None:
         features = ds.build_features(daily, register, cfg, rain)
         inputs = {"reservoir_daily": daily, "register": register, "rain": rain}
         print(ds.write_dataset(features, cfg, inputs, Path(args.out)))
+    elif args.cmd == "inflow-evaluate":
+        from pathlib import Path
+
+        from spillway_forecast.inflow_run import run as run_inflow
+
+        print(run_inflow(Path(args.dataset), Path(args.out)))
     elif args.cmd == "train":
         from spillway_forecast.train import train
 

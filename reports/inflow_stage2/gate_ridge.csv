@@ -1,0 +1,15 @@
+h,best_reference,wins_nse_or_kge,bias_not_worse,peak_not_worse,coverage_median,coverage_ok,share_worse,share_worse_ok,publish
+1,persistence,true,false,false,0.7963576158940397,true,0.08695652173913043,true,false
+2,persistence,true,false,false,0.7919426048565121,true,0.08695652173913043,true,false
+3,persistence,true,false,false,0.7996688741721855,true,0.08695652173913043,true,false
+4,persistence,true,false,false,0.8002207505518764,true,0.043478260869565216,true,false
+5,persistence,true,false,false,0.8002207505518764,true,0.043478260869565216,true,false
+6,persistence,true,false,false,0.793046357615894,true,0.043478260869565216,true,false
+7,recession,true,true,true,0.7963576158940397,true,0.0,true,true
+8,persistence,true,false,false,0.7974613686534217,true,0.0,true,false
+9,persistence,true,false,false,0.7880794701986755,true,0.0,true,false
+10,persistence,true,false,false,0.7858719646799117,true,0.0,true,false
+11,moving_average_7d,true,false,false,0.7753863134657837,true,0.0,true,false
+12,moving_average_7d,true,false,false,0.7753863134657837,true,0.0,true,false
+13,moving_average_7d,true,false,false,0.7698675496688742,true,0.0,true,false
+14,moving_average_7d,true,false,false,0.7709713024282561,true,0.0,true,false
