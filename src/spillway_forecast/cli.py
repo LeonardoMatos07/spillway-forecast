@@ -122,6 +122,10 @@ def main() -> None:
     p_fe = sub.add_parser("flag-evaluate", help="stage 4: flag model vs references (needs the DB)")
     p_fe.add_argument("--dsn", default=os.environ.get("WAREHOUSE_DSN"))
     p_fe.add_argument("--out", required=True)
+    p_fp = sub.add_parser("flag-publish", help="stage 5: publish the due flag runs and score")
+    p_fp.add_argument("--dsn", default=os.environ.get("WAREHOUSE_DSN"))
+    p_fp.add_argument("--results", required=True, help="reports/flag/results.json")
+    p_fp.add_argument("--target-month", required=True, help="YYYY-MM-01")
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -183,6 +187,18 @@ def main() -> None:
         if not args.dsn:
             parser.error("flag-evaluate needs --dsn or WAREHOUSE_DSN")
         flag_run.evaluate(args.dsn, Path(args.out))
+    elif args.cmd == "flag-publish":
+        from pathlib import Path
+
+        from spillway_forecast import flag_publish
+
+        if not args.dsn:
+            parser.error("flag-publish needs --dsn or WAREHOUSE_DSN")
+        print(
+            flag_publish.publish(
+                args.dsn, Path(args.results), date.fromisoformat(args.target_month)
+            )
+        )
     elif args.cmd == "train":
         from spillway_forecast.train import train
 
