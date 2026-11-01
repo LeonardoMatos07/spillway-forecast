@@ -25,6 +25,9 @@ lake = [
 warehouse = [
     "psycopg[binary]>=3.3.6",
 ]
+deep = [
+    "torch>=2.15.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.4,<0.14.0"]
@@ -71,3 +74,11 @@ disable_error_code = ["arg-type", "assignment", "operator", "no-any-return", "st
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

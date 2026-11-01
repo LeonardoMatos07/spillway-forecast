@@ -1,0 +1,119 @@
+{
+  "cell_gru": {
+    "epochs": 7.0,
+    "seconds": 115.67168283462524,
+    "valid_pinball": 0.10178328305482864
+  },
+  "cell_lstm": {
+    "epochs": 9.0,
+    "seconds": 57.73576998710632,
+    "valid_pinball": 0.10319237411022186
+  },
+  "chosen_cell": "gru",
+  "dataset_id": "26b4096746a8573b",
+  "net": {
+    "config": {
+      "batch": 256,
+      "cell": "gru",
+      "dropout": 0.2,
+      "epochs": 20,
+      "hidden": 48,
+      "lr": 0.002,
+      "patience": 4,
+      "samples_per_epoch": 30000,
+      "threads": 4,
+      "use_rain": true,
+      "window": 90
+    },
+    "runs": [
+      {
+        "epochs": 7.0,
+        "seconds": 124.16980504989624,
+        "seed": 11,
+        "valid_pinball": 0.10178328305482864
+      },
+      {
+        "epochs": 7.0,
+        "seconds": 126.34584593772888,
+        "seed": 22,
+        "valid_pinball": 0.10238244384527206
+      },
+      {
+        "epochs": 6.0,
+        "seconds": 109.6711220741272,
+        "seed": 33,
+        "valid_pinball": 0.10302742570638657
+      },
+      {
+        "epochs": 6.0,
+        "seconds": 109.03086185455322,
+        "seed": 44,
+        "valid_pinball": 0.10201768577098846
+      },
+      {
+        "epochs": 10.0,
+        "seconds": 189.2333824634552,
+        "seed": 55,
+        "valid_pinball": 0.10141180455684662
+      }
+    ]
+  },
+  "net_no_rain": {
+    "config": {
+      "batch": 256,
+      "cell": "gru",
+      "dropout": 0.2,
+      "epochs": 20,
+      "hidden": 48,
+      "lr": 0.002,
+      "patience": 4,
+      "samples_per_epoch": 30000,
+      "threads": 4,
+      "use_rain": false,
+      "window": 90
+    },
+    "runs": [
+      {
+        "epochs": 9.0,
+        "seconds": 153.95411229133606,
+        "seed": 11,
+        "valid_pinball": 0.10167089849710464
+      },
+      {
+        "epochs": 10.0,
+        "seconds": 205.7616090774536,
+        "seed": 22,
+        "valid_pinball": 0.1006944328546524
+      },
+      {
+        "epochs": 13.0,
+        "seconds": 243.15751814842224,
+        "seed": 33,
+        "valid_pinball": 0.10066210478544235
+      },
+      {
+        "epochs": 10.0,
+        "seconds": 261.28029584884644,
+        "seed": 44,
+        "valid_pinball": 0.1018407791852951
+      },
+      {
+        "epochs": 10.0,
+        "seconds": 190.4476034641266,
+        "seed": 55,
+        "valid_pinball": 0.10063712298870087
+      }
+    ]
+  },
+  "publishable_horizons": {
+    "net": [],
+    "net_no_rain": []
+  },
+  "seeds": [
+    11,
+    22,
+    33,
+    44,
+    55
+  ]
+}

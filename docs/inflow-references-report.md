@@ -54,7 +54,9 @@ A falha é sempre a mesma: venceram em NSE e cobertura, mas não em viés e pico
 ## Ponto de decisão 1
 
 1. Os resultados acima são o piso que a rede (Etapa 3) precisa superar. A rede só vale a pena se corrigir picos e viés; o ganho possível está em h=3 a 14.
-2. A condição "viés e picos não piores que a melhor referência" é praticamente impossível contra a persistência. Proposta, NÃO aplicada: trocar por uma tolerância absoluta (por exemplo, viés mediano até 5% e erro de pico até 30% em módulo), ou comparar viés e picos contra a melhor referência POR NSE com tolerância. Decisão do dono, antes da Etapa 3. Com tolerância de 5% / 30% (só viés, picos e cobertura, mediana do teste; o NSE já é maior), o ridge cumpriria h=1 a 8 e o boosting h=1 e 2.
+2. O critério estrito permanece como está e vale para a publicação. A condição "viés e picos não piores que a melhor referência" é muito dura contra a persistência (viés de 0,1% a 0,7%), mas ajustá-la depois de ver os resultados não é permitido pela spec; qualquer mudança é decisão do dono para rodadas futuras.
+
+   **Análise exploratória pós-hoc, não vale para publicação:** se a regra fosse uma tolerância absoluta (viés mediano até 5% em módulo, erro de pico até 30% em módulo, cobertura 70% a 90%, sem as demais condições), o ridge cumpriria h=1 a 8 e o boosting h=1 e 2 no teste. Isto foi calculado depois de ver os resultados e serve só de informação.
 3. Chuva: com atraso de 46 dias ela não entra. Seguir só com vazões, ou obter fonte de menor atraso (GPM IMERG Late exige conta Earthdata, que é decisão do dono).
 4. Topologia e montante continuam fora (só nos pilotos, à mão).
 
