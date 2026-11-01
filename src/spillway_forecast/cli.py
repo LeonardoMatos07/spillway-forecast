@@ -117,6 +117,11 @@ def main() -> None:
     p_ev = sub.add_parser("inflow-evaluate", help="stage 2: references vs ridge vs boosting")
     p_ev.add_argument("--dataset", required=True, help="dataset directory (features.parquet)")
     p_ev.add_argument("--out", required=True)
+    p_fb = sub.add_parser("flag-backtest", help="rule engine vs the bulletins (no database)")
+    p_fb.add_argument("--out", help="write the reproduction report (markdown) here")
+    p_fe = sub.add_parser("flag-evaluate", help="stage 4: flag model vs references (needs the DB)")
+    p_fe.add_argument("--dsn", default=os.environ.get("WAREHOUSE_DSN"))
+    p_fe.add_argument("--out", required=True)
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -161,6 +166,23 @@ def main() -> None:
         from spillway_forecast.inflow_run import run as run_inflow
 
         print(run_inflow(Path(args.dataset), Path(args.out)))
+    elif args.cmd == "flag-backtest":
+        from pathlib import Path
+
+        from spillway_forecast import flag_run
+
+        text = flag_run.backtest_report()
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+        print(text)
+    elif args.cmd == "flag-evaluate":
+        from pathlib import Path
+
+        from spillway_forecast import flag_run
+
+        if not args.dsn:
+            parser.error("flag-evaluate needs --dsn or WAREHOUSE_DSN")
+        flag_run.evaluate(args.dsn, Path(args.out))
     elif args.cmd == "train":
         from spillway_forecast.train import train
 

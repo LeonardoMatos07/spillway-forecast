@@ -138,10 +138,13 @@ def compute_bands(pld_min: Num, pld_max: Num, gsf: Num, rule: RuleVersion = RULE
     lo, hi, g = _dec(pld_min), _dec(pld_max), _dec(gsf)
     if lo > hi:
         raise ValueError("pld_min must not exceed pld_max")
-    if not Decimal(0) <= g < Decimal(1):
-        raise ValueError("gsf must be in [0, 1) for Lim / (1 - GSF) to be meaningful")
+    if g < 0:
+        raise ValueError("gsf must not be negative")
 
     def edge(lim: Decimal) -> Decimal:
+        # GSF >= 1: the limit is unbounded (division by zero or negative), so it clamps to PLDmax.
+        if g >= 1:
+            return round_half_up(hi)
         return round_half_up(min(hi, max(lo, lim / (Decimal(1) - g))))
 
     return Bands(
