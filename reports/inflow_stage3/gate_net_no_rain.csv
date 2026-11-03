@@ -1,0 +1,15 @@
+h,best_reference,wins_nse_or_kge,bias_not_worse,peak_not_worse,coverage_median,coverage_ok,share_worse,share_worse_ok,publish
+1,ridge,false,false,false,0.8559602649006622,true,0.8695652173913043,false,false
+2,ridge,false,false,false,0.8360927152317881,true,0.8695652173913043,false,false
+3,ridge,true,false,false,0.8228476821192053,true,0.782608695652174,false,false
+4,ridge,true,false,false,0.8156732891832229,true,0.6086956521739131,false,false
+5,ridge,true,false,false,0.8013245033112583,true,0.4782608695652174,false,false
+6,ridge,true,false,false,0.7935982339955849,true,0.391304347826087,false,false
+7,ridge,true,false,false,0.7919426048565121,true,0.2608695652173913,true,false
+8,ridge,true,false,false,0.7792494481236203,true,0.21739130434782608,true,false
+9,ridge,true,false,false,0.7731788079470199,true,0.13043478260869565,true,false
+10,ridge,true,false,false,0.7687637969094923,true,0.08695652173913043,true,false
+11,ridge,true,false,true,0.7599337748344371,true,0.08695652173913043,true,false
+12,ridge,true,false,true,0.7577262693156733,true,0.13043478260869565,true,false
+13,ridge,true,false,false,0.7533112582781457,true,0.13043478260869565,true,false
+14,ridge,true,false,false,0.7588300220750552,true,0.13043478260869565,true,false

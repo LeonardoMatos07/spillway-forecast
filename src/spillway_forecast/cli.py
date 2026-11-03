@@ -107,6 +107,25 @@ def main() -> None:
     p_reg = sub.add_parser("register", help="register the saved model bundle in MLflow")
     p_reg.add_argument("--run-id", default=None)
     sub.add_parser("reconcile", help="check hourly aggregation against the warehouse")
+    p_ds = sub.add_parser("inflow-dataset", help="build the versioned inflow training set")
+    p_ds.add_argument("--reservoir-daily", required=True, help="parquet of reservoir_daily")
+    p_ds.add_argument("--register", required=True, help="parquet of the reservoir table")
+    p_ds.add_argument("--rain", default=None, help="parquet of the IMERG rain (spillway-data)")
+    p_ds.add_argument("--out", required=True)
+    p_ds.add_argument("--reservoir", action="append", help="restrict to these reservoir ids")
+    p_ds.add_argument("--rain-lag-days", type=int, default=46)
+    p_ev = sub.add_parser("inflow-evaluate", help="stage 2: references vs ridge vs boosting")
+    p_ev.add_argument("--dataset", required=True, help="dataset directory (features.parquet)")
+    p_ev.add_argument("--out", required=True)
+    p_fb = sub.add_parser("flag-backtest", help="rule engine vs the bulletins (no database)")
+    p_fb.add_argument("--out", help="write the reproduction report (markdown) here")
+    p_fe = sub.add_parser("flag-evaluate", help="stage 4: flag model vs references (needs the DB)")
+    p_fe.add_argument("--dsn", default=os.environ.get("WAREHOUSE_DSN"))
+    p_fe.add_argument("--out", required=True)
+    p_fp = sub.add_parser("flag-publish", help="stage 5: publish the due flag runs and score")
+    p_fp.add_argument("--dsn", default=os.environ.get("WAREHOUSE_DSN"))
+    p_fp.add_argument("--results", required=True, help="reports/flag/results.json")
+    p_fp.add_argument("--target-month", required=True, help="YYYY-MM-01")
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO,
@@ -128,6 +147,58 @@ def main() -> None:
             print(ing.ingest_silver(today=date.today()))
         else:
             print(ing.ingest(refresh_last=args.refresh_last, today=date.today()))
+    elif args.cmd == "inflow-dataset":
+        from pathlib import Path
+
+        import polars as pl
+
+        from spillway_forecast import inflow_dataset as ds
+
+        daily = pl.read_parquet(args.reservoir_daily)
+        register = pl.read_parquet(args.register)
+        rain = pl.read_parquet(args.rain) if args.rain else None
+        cfg = ds.DatasetConfig(
+            reservoirs=tuple(args.reservoir) if args.reservoir else None,
+            rain_lag_days=args.rain_lag_days,
+        )
+        features = ds.build_features(daily, register, cfg, rain)
+        inputs = {"reservoir_daily": daily, "register": register, "rain": rain}
+        print(ds.write_dataset(features, cfg, inputs, Path(args.out)))
+    elif args.cmd == "inflow-evaluate":
+        from pathlib import Path
+
+        from spillway_forecast.inflow_run import run as run_inflow
+
+        print(run_inflow(Path(args.dataset), Path(args.out)))
+    elif args.cmd == "flag-backtest":
+        from pathlib import Path
+
+        from spillway_forecast import flag_run
+
+        text = flag_run.backtest_report()
+        if args.out:
+            Path(args.out).write_text(text, encoding="utf-8")
+        print(text)
+    elif args.cmd == "flag-evaluate":
+        from pathlib import Path
+
+        from spillway_forecast import flag_run
+
+        if not args.dsn:
+            parser.error("flag-evaluate needs --dsn or WAREHOUSE_DSN")
+        flag_run.evaluate(args.dsn, Path(args.out))
+    elif args.cmd == "flag-publish":
+        from pathlib import Path
+
+        from spillway_forecast import flag_publish
+
+        if not args.dsn:
+            parser.error("flag-publish needs --dsn or WAREHOUSE_DSN")
+        print(
+            flag_publish.publish(
+                args.dsn, Path(args.results), date.fromisoformat(args.target_month)
+            )
+        )
     elif args.cmd == "train":
         from spillway_forecast.train import train
 

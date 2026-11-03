@@ -1,0 +1,42 @@
+{
+  "chosen_on_validation": {
+    "gbm_quantile": {
+      "max_iter_max_depth": [
+        300,
+        4
+      ]
+    },
+    "ridge": {
+      "alpha_by_horizon": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ]
+    }
+  },
+  "dataset_id": "26b4096746a8573b",
+  "publishable_horizons": {
+    "gbm_no_rain": [],
+    "gbm_quantile": [],
+    "ridge": [
+      7
+    ]
+  },
+  "reservoirs": 23,
+  "rows": {
+    "test": 41676,
+    "train": 134090,
+    "valid": 24886
+  }
+}
